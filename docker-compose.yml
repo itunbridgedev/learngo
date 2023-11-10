@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: pgsql-dev
+    environment:
+      POSTGRES_PASSWORD: supersecret # Use a strong password
+      POSTGRES_USER: mydbuser       # Your custom user, if needed
+      POSTGRES_DB: gocommerce      # Your custom database name, if needed
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # Persist database data
+      - ./init-db:/docker-entrypoint-initdb.d  # Mounts the init-db directory to the container
+    ports:
+      - "5432:5432" # Default port for PostgreSQL
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: itunbridgedev@gmail.com  # The default email to log in to pgAdmin
+      PGADMIN_DEFAULT_PASSWORD: supersecret             # The default password to log in to pgAdmin
+      PGADMIN_LISTEN_PORT: 80
+    ports:
+      - "8080:80" # pgAdmin will be available on http://localhost:8080
+    volumes:
+      - ./config/pgAdmin/servers.json:/pgadmin4/servers.json
+      - ./config/pgAdmin/passfile:/pgpassfile
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  api:
+    build: .
+    depends_on:
+      - postgres
+    environment:
+      - JWT_SECRET_KEY:"biQka2ONY/0/cqwv54dR8HZ9au0ye/ucRryODERXRnr54vneZrNGm92eXpXCFJmhq9KUT3JKWigatnvjNZDkUQ=="
+    ports:
+      - "8088:8088" # Change this if your app uses a different port
+
+volumes:
+  postgres_data:
