@@ -60,6 +60,12 @@ func (h *ShoppingCartHandler) GetCart(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(cartItems)
 }
 
+func (h *ShoppingCartHandler) TestCartRoute(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Test route works")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "test route is working"})
+}
+
 func (h *ShoppingCartHandler) AddItemToCart(w http.ResponseWriter, r *http.Request) {
 	// Extract the user ID from the context
 	ctx := r.Context()
@@ -81,18 +87,78 @@ func (h *ShoppingCartHandler) AddItemToCart(w http.ResponseWriter, r *http.Reque
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	// Insert the new cart item into the database
-	_, err := h.DB.Exec("INSERT INTO cart_items (user_id, product_id, quantity) VALUES ($1, $2, $3)", userID, item.ProductID, item.Quantity)
+	tx, err := h.DB.Begin()
 	if err != nil {
 		http.Error(w, "Server error", http.StatusInternalServerError)
-		log.Printf("Error adding item to cart: %v", err)
+		log.Printf("Error starting transaction: %v", err)
+		return
+	}
+	defer tx.Rollback()
+
+	// Check if the item already exists in the cart
+	var existingQuantity int
+	err = tx.QueryRow("SELECT quantity FROM cart_items WHERE user_id = $1 AND product_id = $2", userID, item.ProductID).Scan(&existingQuantity)
+
+	if err != nil && err != sql.ErrNoRows {
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		log.Printf("Error checking for existing cart item: %v", err)
 		return
 	}
 
-	// Send a successful response
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"message": "Item added to cart successfully"})
+	if err == sql.ErrNoRows {
+		// Item does not exist, insert a new one
+		_, err = tx.Exec("INSERT INTO cart_items (user_id, product_id, quantity) VALUES ($1, $2, $3)", userID, item.ProductID, item.Quantity)
+		if err != nil {
+			http.Error(w, "Server error", http.StatusInternalServerError)
+			log.Printf("Error adding item to cart: %v", err)
+			return
+		}
+	} else {
+		// Item exists, update its quantity
+		newQuantity := existingQuantity + item.Quantity
+		_, err = tx.Exec("UPDATE cart_items SET quantity = $1 WHERE user_id = $2 AND product_id = $3", newQuantity, userID, item.ProductID)
+		if err != nil {
+			http.Error(w, "Server error", http.StatusInternalServerError)
+			log.Printf("Error updating cart item: %v", err)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		log.Printf("Error committing transaction: %v", err)
+		return
+	}
+	// Query the updated cart
+	var updatedCartItems []models.CartItem
+	rows, err := h.DB.Query("SELECT product_id, quantity FROM cart_items WHERE user_id = $1", userID)
+	if err != nil {
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		log.Printf("Error retrieving updated cart: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cartItem models.CartItem
+		if err := rows.Scan(&cartItem.ProductID, &cartItem.Quantity); err != nil {
+			http.Error(w, "Server error", http.StatusInternalServerError)
+			log.Printf("Error scanning cart items: %v", err)
+			return
+		}
+		updatedCartItems = append(updatedCartItems, cartItem)
+	}
+
+	// Check for errors from iterating over rows
+	if err := rows.Err(); err != nil {
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		log.Printf("Error iterating over cart items: %v", err)
+		return
+	}
+
+	// Send the updated cart as a response
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(updatedCartItems)
 }
 
 // validateCartItemDetails validates the details of a cart item.

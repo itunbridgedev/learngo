@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"gocommerce/models"
+	"log"
 	"net/http"
 	"os"
 	"regexp"
@@ -18,34 +20,64 @@ type AuthenticationHandler struct {
 	DB *sql.DB
 }
 
-var jwtSecretKey = os.Getenv("JWT_SECRET_KEY")
+var jwtSecretKey = []byte(os.Getenv("JWT_SECRET_KEY"))
 
-// validateCredentials checks the provided credentials against the database.
-// Returns true if valid, false otherwise.
-func (h *AuthenticationHandler) validateCredentials(username, password string) bool {
-	// Retrieve the user from the database
+func (h *AuthenticationHandler) validateCredentials(username, password string) (float64, error) {
 	var hashedPassword string
-	err := h.DB.QueryRow("SELECT passwordhash FROM users WHERE username = $1", username).Scan(&hashedPassword)
+	var userID float64
+	err := h.DB.QueryRow("SELECT id, password_hash FROM users WHERE username = $1", username).Scan(&userID, &hashedPassword)
 	if err != nil {
-		// Handle error (e.g., user not found)
-		return false
+		// Handle sql.ErrNoRows separately if needed (user not found)
+		// Return 0 for the userID and the error
+		return 0, err
 	}
 
-	// Compare the provided password with the stored hashed password
+	// Compare the hashed password with the provided password
 	err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
-	return err == nil // true if passwords match, false otherwise
+	if err != nil {
+		// Return 0 for the userID and a specific error indicating password mismatch
+		return 0, fmt.Errorf("password mismatch")
+	}
+
+	// Return the user ID and nil error if the credentials are valid
+	return userID, nil
 }
 
-// generateToken creates a new JWT token for a given username.
-func (h *AuthenticationHandler) generateToken(username string) (string, error) {
+func (h *AuthenticationHandler) GenerateToken(userID float64) (string, string, error) {
+	// Log the user ID being used
+	log.Printf("Generating token for user ID: %v", userID)
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"username": username,
-		"exp":      time.Now().Add(time.Hour * 24).Unix(),
+	// Generate Access Token
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": userID,
+		"exp":     time.Now().Add(time.Minute * 15).Unix(), // short-lived access token
 	})
 
-	tokenString, err := token.SignedString(jwtSecretKey)
-	return tokenString, err
+	// Log the Access Token Claims
+	log.Printf("Access Token Claims: %+v", accessToken.Claims)
+
+	at, err := accessToken.SignedString(jwtSecretKey)
+	if err != nil {
+		log.Printf("Error signing access token: %v", err)
+		return "", "", err
+	}
+
+	// Generate Refresh Token
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": userID,
+		"exp":     time.Now().Add(time.Hour * 24 * 7).Unix(), // long-lived refresh token
+	})
+
+	// Log the Refresh Token Claims
+	log.Printf("Refresh Token Claims: %+v", refreshToken.Claims)
+
+	rt, err := refreshToken.SignedString(jwtSecretKey)
+	if err != nil {
+		log.Printf("Error signing refresh token: %v", err)
+		return "", "", err
+	}
+
+	return at, rt, nil
 }
 
 func hashPassword(password string) (string, error) {
@@ -123,20 +155,38 @@ func (h *AuthenticationHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate credentials
-	if !h.validateCredentials(creds.Username, creds.Password) {
+	userID, err := h.validateCredentials(creds.Username, creds.Password)
+	if err != nil {
+		if err.Error() == "password mismatch" {
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		} else {
+			// Handle other errors, like database errors
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			log.Printf("Error validating credentials: %v", err)
+		}
+		return
+	}
+	// Check if userID is valid
+	if userID == 0 {
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
 
 	// Generate token
-	token, err := h.generateToken(creds.Username)
+	accessToken, refreshToken, err := h.GenerateToken(userID)
 	if err != nil {
 		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
+		log.Printf("Error generating token: %v", err)
 		return
 	}
 
-	// Return the token
-	json.NewEncoder(w).Encode(map[string]string{"token": token})
+	response := map[string]string{
+		"token":        accessToken,
+		"refreshToken": refreshToken,
+	}
+
+	// Encoding the response as JSON and sending it
+	json.NewEncoder(w).Encode(response)
 }
 
 func (h *AuthenticationHandler) Register(w http.ResponseWriter, r *http.Request) {
@@ -175,32 +225,6 @@ func (h *AuthenticationHandler) Register(w http.ResponseWriter, r *http.Request)
 		},
 	}
 	json.NewEncoder(w).Encode(response)
-}
-
-func GenerateToken(userID float64) (string, string, error) {
-	// Generate Access Token
-	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": userID,
-		"exp":     time.Now().Add(time.Minute * 15).Unix(), // short-lived access token
-	})
-
-	at, err := accessToken.SignedString(jwtSecretKey)
-	if err != nil {
-		return "", "", err
-	}
-
-	// Generate Refresh Token
-	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": userID,
-		"exp":     time.Now().Add(time.Hour * 24 * 7).Unix(), // long-lived refresh token
-	})
-
-	rt, err := refreshToken.SignedString(jwtSecretKey)
-	if err != nil {
-		return "", "", err
-	}
-
-	return at, rt, nil
 }
 
 // validateRefreshToken checks if the refresh token is valid.
@@ -258,7 +282,7 @@ func (h *AuthenticationHandler) RefreshToken(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Generate new tokens
-	accessToken, refreshToken, err := GenerateToken(userID)
+	accessToken, refreshToken, err := h.GenerateToken(userID)
 	if err != nil {
 		http.Error(w, "Failed to generate tokens", http.StatusInternalServerError)
 		return

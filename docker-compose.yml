@@ -39,6 +39,15 @@ services:
       - JWT_SECRET_KEY:"biQka2ONY/0/cqwv54dR8HZ9au0ye/ucRryODERXRnr54vneZrNGm92eXpXCFJmhq9KUT3JKWigatnvjNZDkUQ=="
     ports:
       - "8088:8088" # Change this if your app uses a different port
+      - "2345:2345"
+  react-app:
+    build:
+      context: ./front-end
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"  # Map port 80 in the container to port 3000 on the host
+    depends_on:
+      - api
 
 volumes:
   postgres_data:

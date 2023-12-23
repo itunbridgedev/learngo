@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Attach to Docker",
+            "type": "go",
+            "request": "attach",
+            "mode": "remote",
+            "remotePath": "/app",  // Path to your Go files in the container
+            "port": 2345,  // The port Delve is listening on
+            "host": "127.0.0.1",  // Use localhost or the Docker container's IP
+            "showLog": true
+        }
+    ]
+}
