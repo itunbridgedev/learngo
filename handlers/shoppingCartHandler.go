@@ -60,12 +60,6 @@ func (h *ShoppingCartHandler) GetCart(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(cartItems)
 }
 
-func (h *ShoppingCartHandler) TestCartRoute(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Test route works")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "test route is working"})
-}
-
 func (h *ShoppingCartHandler) AddItemToCart(w http.ResponseWriter, r *http.Request) {
 	// Extract the user ID from the context
 	ctx := r.Context()

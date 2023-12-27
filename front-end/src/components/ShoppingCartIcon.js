@@ -1,13 +1,19 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useCart } from '../contexts/CartContext';
+import { connect } from 'react-redux';
+import { updateCartItems, fetchCartData } from '../actions/cartActions';
 
-const ShoppingCartIcon = () => {
+const ShoppingCartIcon = ({ cartData, itemCount, fetchCartData, hasFetched }) => {
     const navigate = useNavigate();
     const navigateToCart = () => {
         navigate('/cart');
     };
-    const { itemCount } = useCart();
+    useEffect(() => {
+        if (!hasFetched) {
+            fetchCartData();
+        }
+    }, [fetchCartData, hasFetched]);
+
     return (
         <div onClick={navigateToCart} style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
             {/* Icon - you can replace this with an actual icon from a library like FontAwesome */}
@@ -23,5 +29,15 @@ const ShoppingCartIcon = () => {
         </div>
     );
 };
+const mapStateToProps = (state) => ({
+    cartData: state.cart.cartData || [],
+    itemCount: (state.cart.cartData || []).reduce((total, item) => total + item.quantity, 0),
+    hasFetched: state.cart.hasFetched
+});
 
-export default ShoppingCartIcon;
+const mapDispatchToProps = {
+    updateCartItems,
+    fetchCartData,
+};
+
+export default connect(mapStateToProps, mapDispatchToProps)(ShoppingCartIcon);

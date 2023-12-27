@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { fetchWithToken } from '../utils/authUtils';
-import { useCart } from '../contexts/CartContext';
+import { connect } from 'react-redux';
+import { fetchCartData } from '../actions/cartActions';
 
-const ShoppingCart = () => {
-    const { cartData, fetchCartData } = useCart();
+const ShoppingCart = ({ cartData, cartLoading, cartError, fetchCartData, hasFetched }) => {
     const [cartItemsWithDetails, setCartItemsWithDetails] = useState([]);
     
     // State to keep track of edited quantities
@@ -16,7 +16,7 @@ const ShoppingCart = () => {
 
     const onUpdate = async (productId, newQuantity) => {
         // Logic to update the item on the server
-        const response = await fetchWithToken(`/api/cart/update/${productId}`, {
+        const response = await fetchWithToken(`/api/cart/items/${productId}`, {
             method: 'PUT',
             body: JSON.stringify({ quantity: newQuantity })
         });
@@ -29,7 +29,7 @@ const ShoppingCart = () => {
 
     const onDelete = async (productId) => {
         // Logic to delete the item from the server
-        const response = await fetchWithToken(`/api/cart/delete/${productId}`, {
+        const response = await fetchWithToken(`/api/cart/items/${productId}`, {
             method: 'DELETE'
         });
         if (!response.ok) {
@@ -40,6 +40,9 @@ const ShoppingCart = () => {
     }; 
 
     useEffect(() => {
+        if(!hasFetched) {
+            fetchCartData();
+        }        
         // Fetch product details for each item in the cart
         const fetchProductDetails = async () => {
           const cartItemsWithDetails = await Promise.all(
@@ -58,14 +61,14 @@ const ShoppingCart = () => {
         if (cartData.length > 0) {
           fetchProductDetails();
         }
-      }, [cartData]);
+      }, [fetchCartData, cartData, hasFetched]);
     
     const calculateSubtotal = (item) => {
-        return item.productData.price * (editedQuantities[item.productID] || item.productData.quantity);
+        return item.productData.price * (editedQuantities[item.product_id] || item.quantity);
     };
 
-    const total = cartData.reduce((acc, item) => {
-        return acc + calculateSubtotal(item);
+    const total = cartItemsWithDetails.reduce((acc, item) => {
+        return acc + calculateSubtotal(item, "total");
     }, 0);
     // Render each cart item
     return (
@@ -77,16 +80,16 @@ const ShoppingCart = () => {
                         <span>Price: {item.productData.price}</span>
                         <input
                             type="number"
-                            value={editedQuantities[item.productID] || item.quantity}
-                            onChange={(e) => handleQuantityChange(item.productID, parseInt(e.target.value, 10))}
+                            value={editedQuantities[item.product_id] || item.quantity}
+                            onChange={(e) => handleQuantityChange(item.product_id, parseInt(e.target.value, 10))}
                         />
-                        <span>Subtotal: {calculateSubtotal(item)}</span>
+                        <span>Subtotal: {calculateSubtotal(item, "sub")}</span>
                     </div>
                     <div className="item-actions">
-                        <button onClick={() => onUpdate(item.productID, editedQuantities[item.productID] || item.quantity)}>
+                        <button onClick={() => onUpdate(item.product_id, editedQuantities[item.product_id] || item.quantity)}>
                             Update
                         </button>
-                        <button onClick={() => onDelete(item.productID)}>Delete</button>
+                        <button onClick={() => onDelete(item.product_id)}>Delete</button>
                     </div>
                 </div>
             ))}
@@ -97,5 +100,15 @@ const ShoppingCart = () => {
     );
 };
 
+const mapStateToProps = (state) => ({
+    cartData: state.cart.cartData,
+    cartLoading: state.cart.cartLoading,
+    cartError: state.cart.cartError,
+    hasFetched: state.cart.hasFetched
+});
 
-export default ShoppingCart;
+const mapDispatchToProps = {
+    fetchCartData,
+};
+
+export default connect(mapStateToProps, mapDispatchToProps)(ShoppingCart);

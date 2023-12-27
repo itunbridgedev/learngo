@@ -1,9 +1,10 @@
 // src/components/AddToCart.js
 import React, { useState } from 'react';
 import { fetchWithToken } from '../utils/authUtils'; // Adjust the import path as needed
-import { useCart } from '../contexts/CartContext';
-const AddToCart = ({ product_id }) => {
-    const { updateCartItems } = useCart();
+import { connect } from 'react-redux';
+import { updateCartItems } from '../actions/cartActions';
+
+const AddToCart = ({ product_id, updateCartItems }) => {
     const [quantity, setQuantity] = useState(1);
     const addToCart = async () => {
         const response = await fetchWithToken('/api/cart/items', {
@@ -36,4 +37,12 @@ const AddToCart = ({ product_id }) => {
     );
 };
 
-export default AddToCart;
+const mapStateToProps = (state) => ({
+    cartData: state.cart.cartData,
+});
+
+const mapDispatchToProps = {
+    updateCartItems,
+};
+
+export default connect(mapStateToProps, mapDispatchToProps)(AddToCart);
